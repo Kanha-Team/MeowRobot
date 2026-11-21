@@ -16,7 +16,7 @@ countryinfo==0.1.2
 emoji==2.15.0
 emoji-country-flag==2.0.1
 gpytranslate==2.0.0
-hachoir==3.3.0
+hachoir==3.4.0
 lxml==4.9.3
 markdown2==2.5.4
 motor==3.7.1
