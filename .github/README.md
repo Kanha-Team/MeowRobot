@@ -197,7 +197,7 @@ sudo systemctl status meowrobot.service
 | `SUPPORT_CHAT` | Telegram Support Group username | No | `MeowClone` |
 | `SUPPORT_CHANNEL` | Telegram Updates Channel username | No | `MeowCloner` |
 | `START_IMG` | Start command banner image URL | No | `https://files.catbox.moe/4ntzos.jpg` |
-| `CHATBOT_API_URL` | AI Chatbot endpoint URL | No | `https://chatgp-nine.vercel.app/api/chat` |
+| `CHATBOT_API_URL` | AI Chatbot endpoint URL | No | `https://chatbot.riteshyt.in/api/chat` |
 | `CHATBOT_API_KEY` | Bearer API Key for Chatbot engine | No | `ritesh-8179b3a5da99f...` |
 | `WORKERS` | Async worker routines for update handling | No | `8` |
 
