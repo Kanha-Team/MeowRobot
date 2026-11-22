@@ -1,0 +1,349 @@
+#
+# Copyright (C) 2026 by Kanha-Team@Github, < https://github.com/Kanha-Team>.
+# This file is part of < https://github.com/Kanha-Team/MeowRobot > project,
+# and is released under the "GNU v3.0 License Agreement".
+# Please see < https://github.com/Kanha-Team/MeowRobot/blob/master/LICENSE >
+#
+# All rights reserved.
+
+import importlib
+from typing import Union
+
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import (
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+)
+from telegram.helpers import escape_markdown
+
+from MeowRobot import application, DRAGONS, DEV_USERS
+from MeowRobot.modules.helper_funcs.handlers import CMD_STARTERS, SpamChecker
+from MeowRobot.modules.helper_funcs.misc import is_module_loaded
+
+FILENAME = __name__.rsplit(".", 1)[-1]
+
+# If module is due to be loaded, then setup all the magical handlers
+if is_module_loaded(FILENAME):
+    from MeowRobot.modules.helper_funcs.chat_status import (
+        connection_status,
+        is_user_admin,
+        user_admin,
+    )
+    from MeowRobot.modules.sql import disable_sql as sql
+
+    DISABLE_CMDS = []
+    DISABLE_OTHER = []
+    ADMIN_CMDS = []
+
+    class DisableAbleCommandHandler(CommandHandler):
+        def __init__(self, command, callback, admin_ok=False, **kwargs):
+            super().__init__(command, callback, **kwargs)
+            self.admin_ok = admin_ok
+            if isinstance(command, str):
+                DISABLE_CMDS.append(command)
+                if admin_ok:
+                    ADMIN_CMDS.append(command)
+            else:
+                DISABLE_CMDS.extend(command)
+                if admin_ok:
+                    ADMIN_CMDS.extend(command)
+
+        def check_update(self, update):
+            if isinstance(update, Update) and update.effective_message:
+                message = update.effective_message
+
+                if message.text and len(message.text) > 1:
+                    fst_word = message.text.split(None, 1)[0]
+                    if len(fst_word) > 1 and any(
+                        fst_word.startswith(start) for start in CMD_STARTERS
+                    ):
+                        command_parts = fst_word[1:].split("@")
+
+                        command_name = command_parts[0].lower()
+                        if command_name not in [c.lower() for c in self.commands]:
+                            return None
+
+                        if len(command_parts) > 1:
+                            bot_username = update.get_bot().username
+                            if command_parts[1].lower() != bot_username.lower():
+                                return None
+
+                        chat = update.effective_chat
+                        user = update.effective_user
+                        if user.id == 1087968824:
+                            user_id = chat.id
+                        else:
+                            user_id = user.id
+                        if SpamChecker.check_user(user_id):
+                            return None
+
+                        # Use parent check_update to verify filters
+                        res = super().check_update(update)
+                        if res:
+                            # disabled, admincmd, user admin
+                            if sql.is_command_disabled(chat.id, command_name):
+                                # check if command was disabled
+                                # NOTE: we can't await is_user_admin here as check_update is sync.
+                                # For now, we only allow disabling for non-admins if it's an admin command.
+                                # In reality, we should probably check cache or similar.
+                                from MeowRobot.modules.helper_funcs.chat_status import ADMIN_CACHE
+                                is_admin = False
+                                if user.id in (DRAGONS + DEV_USERS + [777000, 1087968824]):
+                                    is_admin = True
+                                else:
+                                    try:
+                                        is_admin = user.id in ADMIN_CACHE[chat.id]
+                                    except KeyError:
+                                        pass
+
+                                is_disabled = command_name in ADMIN_CMDS and is_admin
+                                if not is_disabled:
+                                    return None
+                                else:
+                                    return res
+
+                            return res
+                        else:
+                            return None
+
+    class DisableAbleMessageHandler(MessageHandler):
+        def __init__(self, filters, callback, friendly, **kwargs):
+            super().__init__(filters, callback, **kwargs)
+            DISABLE_OTHER.append(friendly)
+            self.friendly = friendly
+
+        def check_update(self, update):
+            chat = update.effective_chat
+            res = super().check_update(update)
+
+            if res:
+                if sql.is_command_disabled(chat.id, self.friendly):
+                    return None
+                else:
+                    return res
+            return None
+
+    @connection_status
+    @user_admin
+    async def disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        chat = update.effective_chat
+        if len(args) >= 1:
+            disable_cmd = args[0]
+            if disable_cmd.startswith(CMD_STARTERS):
+                disable_cmd = disable_cmd[1:]
+
+            if disable_cmd in set(DISABLE_CMDS + DISABLE_OTHER):
+                sql.disable_command(chat.id, str(disable_cmd).lower())
+                await update.effective_message.reply_text(
+                    f"Disabled the use of `{disable_cmd}`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                await update.effective_message.reply_text("That command can't be disabled")
+
+        else:
+            await update.effective_message.reply_text("What should I disable?")
+
+    @connection_status
+    @user_admin
+    async def disable_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        chat = update.effective_chat
+        if len(args) >= 1:
+            disable_module_name = "MeowRobot.modules." + args[0].rsplit(".", 1)[0]
+
+            try:
+                module = importlib.import_module(disable_module_name)
+            except:
+                await update.effective_message.reply_text("Does that module even exist?")
+                return
+
+            try:
+                command_list = module.__command_list__
+            except:
+                await update.effective_message.reply_text(
+                    "Module does not contain command list!"
+                )
+                return
+
+            disabled_cmds = []
+            failed_disabled_cmds = []
+
+            for disable_cmd in command_list:
+                if disable_cmd.startswith(CMD_STARTERS):
+                    disable_cmd = disable_cmd[1:]
+
+                if disable_cmd in set(DISABLE_CMDS + DISABLE_OTHER):
+                    sql.disable_command(chat.id, str(disable_cmd).lower())
+                    disabled_cmds.append(disable_cmd)
+                else:
+                    failed_disabled_cmds.append(disable_cmd)
+
+            if disabled_cmds:
+                disabled_cmds_string = ", ".join(disabled_cmds)
+                await update.effective_message.reply_text(
+                    f"Disabled the uses of `{disabled_cmds_string}`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+            if failed_disabled_cmds:
+                failed_disabled_cmds_string = ", ".join(failed_disabled_cmds)
+                await update.effective_message.reply_text(
+                    f"Commands `{failed_disabled_cmds_string}` can't be disabled",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+        else:
+            await update.effective_message.reply_text("What should I disable?")
+
+    @connection_status
+    @user_admin
+    async def enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        chat = update.effective_chat
+        if len(args) >= 1:
+            enable_cmd = args[0]
+            if enable_cmd.startswith(CMD_STARTERS):
+                enable_cmd = enable_cmd[1:]
+
+            if sql.enable_command(chat.id, enable_cmd):
+                await update.effective_message.reply_text(
+                    f"Enabled the use of `{enable_cmd}`", parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.effective_message.reply_text("Is that even disabled?")
+
+        else:
+            await update.effective_message.reply_text("What should I enable?")
+
+    @connection_status
+    @user_admin
+    async def enable_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        args = context.args
+        chat = update.effective_chat
+
+        if len(args) >= 1:
+            enable_module_name = "MeowRobot.modules." + args[0].rsplit(".", 1)[0]
+
+            try:
+                module = importlib.import_module(enable_module_name)
+            except:
+                await update.effective_message.reply_text("Does that module even exist?")
+                return
+
+            try:
+                command_list = module.__command_list__
+            except:
+                await update.effective_message.reply_text(
+                    "Module does not contain command list!"
+                )
+                return
+
+            enabled_cmds = []
+            failed_enabled_cmds = []
+
+            for enable_cmd in command_list:
+                if enable_cmd.startswith(CMD_STARTERS):
+                    enable_cmd = enable_cmd[1:]
+
+                if sql.enable_command(chat.id, enable_cmd):
+                    enabled_cmds.append(enable_cmd)
+                else:
+                    failed_enabled_cmds.append(enable_cmd)
+
+            if enabled_cmds:
+                enabled_cmds_string = ", ".join(enabled_cmds)
+                await update.effective_message.reply_text(
+                    f"Enabled the uses of `{enabled_cmds_string}`",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+            if failed_enabled_cmds:
+                failed_enabled_cmds_string = ", ".join(failed_enabled_cmds)
+                await update.effective_message.reply_text(
+                    f"Are the commands `{failed_enabled_cmds_string}` even disabled?",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+        else:
+            await update.effective_message.reply_text("What should I enable?")
+
+    @connection_status
+    @user_admin
+    async def list_cmds(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if DISABLE_CMDS + DISABLE_OTHER:
+            result = ""
+            for cmd in set(DISABLE_CMDS + DISABLE_OTHER):
+                result += f" - `{escape_markdown(cmd)}`\n"
+            await update.effective_message.reply_text(
+                f"The following commands are toggleable:\n{result}",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            await update.effective_message.reply_text("No commands can be disabled.")
+
+    # do not async
+    def build_curr_disabled(chat_id: Union[str, int]) -> str:
+        disabled = sql.get_all_disabled(chat_id)
+        if not disabled:
+            return "No commands are disabled!"
+
+        result = ""
+        for cmd in disabled:
+            result += " - `{}`\n".format(escape_markdown(cmd))
+        return "The following commands are currently restricted:\n{}".format(result)
+
+    @connection_status
+    async def commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        chat = update.effective_chat
+        await update.effective_message.reply_text(
+            build_curr_disabled(chat.id), parse_mode=ParseMode.MARKDOWN
+        )
+
+    def __stats__():
+        return f"• {sql.num_disabled()} disabled items, across {sql.num_chats()} chats."
+
+    async def __migrate__(old_chat_id, new_chat_id):
+        sql.migrate_chat(old_chat_id, new_chat_id)
+
+    def __chat_settings__(chat_id, user_id):
+        return build_curr_disabled(chat_id)
+
+    DISABLE_HANDLER = CommandHandler("disable", disable)
+    DISABLE_MODULE_HANDLER = CommandHandler(
+        "disablemodule", disable_module
+    )
+    ENABLE_HANDLER = CommandHandler("enable", enable)
+    ENABLE_MODULE_HANDLER = CommandHandler(
+        "enablemodule", enable_module
+    )
+    COMMANDS_HANDLER = CommandHandler(["cmds", "disabled"], commands)
+    TOGGLE_HANDLER = CommandHandler("listcmds", list_cmds)
+
+    application.add_handler(DISABLE_HANDLER)
+    application.add_handler(DISABLE_MODULE_HANDLER)
+    application.add_handler(ENABLE_HANDLER)
+    application.add_handler(ENABLE_MODULE_HANDLER)
+    application.add_handler(COMMANDS_HANDLER)
+    application.add_handler(TOGGLE_HANDLER)
+
+    __help__ = """
+    ❍ /cmds*:* check the current status of disabled commands
+
+    *Admins only:*
+    ❍ /enable <cmd name>*:* enable that command
+    ❍ /disable <cmd name>*:* disable that command
+    ❍ /enablemodule <module name>*:* enable all commands in that module
+    ❍ /disablemodule <module name>*:* disable all commands in that module
+    ❍ /listcmds*:* list all possible toggleable commands
+    """
+
+    __mod_name__ = "Dɪsᴀʙʟᴇ"
+    __handlers__ = [DISABLE_HANDLER, DISABLE_MODULE_HANDLER, ENABLE_HANDLER, ENABLE_MODULE_HANDLER, COMMANDS_HANDLER, TOGGLE_HANDLER]
+
+else:
+    DisableAbleCommandHandler = CommandHandler
+    DisableAbleMessageHandler = MessageHandler

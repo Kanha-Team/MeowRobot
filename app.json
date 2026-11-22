@@ -1,0 +1,102 @@
+{
+      "name": "MeowRoBot",
+      "description": "An advanced, high-performance Telegram Group Management & AI Bot featuring military-grade security, interactive scientific calculator, Telegram Stars donations, and automated moderation.",
+      "logo": "https://te.legra.ph/file/72e135da30a1a349f2844.jpg",
+      "keywords": [
+         "telegram",
+         "modular",
+         "group",
+         "manager",
+         "MeowRoBot"
+      ],   
+   "repository": "https://github.com/Kanha-Team/MeowRobot",
+   "stack": "heroku-24",
+   "addons": [
+      {
+         "options": {
+            "version": "16"
+         },
+         "plan": "heroku-postgresql"
+      }
+   ],
+   "env": {
+      "API_ID": {
+         "description": "Get this value from my.telegram.org/apps.",
+         "required": true,
+         "value": "24168862"
+      },
+      "API_HASH": {
+         "description": "Get this value from my.telegram.org/apps.",
+         "required": true,
+         "value": "916a9424dd1e58ab7955001ccc0172b3"
+      },
+      "ALLOW_EXCL": {
+         "description": "Set this to True if you want ! to be a command prefix along with /. Recommended is True",
+         "value": "True"
+      },
+      "CASH_API_KEY": {
+         "description": "Required for currency converter. Get yours from https://www.alphavantage.co/support/#api-key",
+         "required": true,
+         "value": "W50UURP7Y0LEVKF4"
+      },
+      "DEL_CMDS": {
+         "description": "Set this to True if you want to delete command messages from users who don't have the perms to run that command.",
+         "value": "True"
+      },
+      "ENV": {
+         "description": "Setting this to ANYTHING will enable environment variables. Leave it as it is",
+         "required": true,
+         "value": "True"
+      },
+      "EVENT_LOGS": {
+         "description": "Event logs channel to note down important bot level events, recommend to make this public. ex: '-123456'",
+         "required": true,
+         "value": "-1004454485434"
+      },
+      "MONGO_DB_URI": {
+         "description": "Required for database connections.",
+         "required": true,
+         "value": ""
+      },
+      "OWNER_ID": {
+         "description": "Your user ID as an integer.",
+         "required": true,
+         "value": "8617644501"
+      },
+      "START_IMG": {
+         "description": "Telegraph link of the image which will be shown at start command.",
+         "required": true,
+         "value": "https://files.catbox.moe/4ntzos.jpg"
+      },
+      "SUPPORT_CHAT": {
+         "description": "Your Telegram support group chat username where your users will go and bother you with shit But be like: MyGroupChatUsernameBlah. If this ever points to MeowRoBot Support than consider you made an enemy.",
+         "required": true,
+         "value": "MeowClone"
+      },
+      "SUPPORT_CHANNEL": {
+         "description": "Your Telegram channel username for bot updates.",
+         "required": true,
+         "value": "MeowCloner"
+      },
+      "TIME_API_KEY": {
+         "description": "Required for timezone information. Get yours from https://timezonedb.com/api",
+         "required": true,
+         "value": "http://api.timezonedb.com/v2.1/convert-time-zone"
+      },
+      "CHATBOT_API_URL": {
+         "description": "Chatbot API endpoint URL",
+         "required": false,
+         "value": "https://chatbot.riteshyt.in/api/chat"
+      },
+      "CHATBOT_API_KEY": {
+         "description": "API key for chatbot",
+         "required": false,
+         "value": "ritesh-8179b3a5da99f300be2d50e1e9789729"
+      },
+      "TOKEN": {
+         "description": "Get bot token from @BotFather on TG",
+         "required": true,
+         "value": ""
+      }
+   }
+}
