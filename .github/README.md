@@ -338,6 +338,9 @@ MeowRobot ships with **over 60 modular extensions**. Below is the complete categ
 ### 9. 🌐 Power Utilities, Media & Network Tools
 | Command | Permission | Description |
 | :--- | :---: | :--- |
+| `/git <username>` | Everyone | ғɪηᴅ ɢɪᴛʜᴜʙ ᴀᴄᴄᴏᴜɴᴛ (bio, repos, stats, avatar) |
+| `/allrepo <username>` | Everyone | ᴧʟʟ ʀєᴘᴏ ʙʏ ɢɪᴛ ᴜsєʀηᴧϻє (list public repos) |
+| `/dlrepo <repo_url>` | Everyone | ᴅσᴡηʟσᴧᴅ ᴢɪᴘ ʙʏ ʀєᴘᴏ ᴜʀʟ or `owner/repo` |
 | `/tgm` or `/tm` (reply)| Everyone | Upload photo/video/doc to Catbox/Telegraph CDN |
 | `/tempmail` | Everyone | Generate a temporary disposable email address |
 | `/checkmail <email>`| Everyone | Check incoming inbox messages for temp email |
