@@ -11,3 +11,7 @@ Thank you for your interest in contributing to MeowRobot!
 1. Fork repository or create feature branch.
 2. Commit your improvements.
 3. Submit a pull request with descriptive title.
+
+## Code Quality
+- Keep pull requests focused on a single feature or bug fix.
+- Document any new environment variables or config settings.
