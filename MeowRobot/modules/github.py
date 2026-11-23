@@ -15,7 +15,6 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime
 
 import aiohttp
 from pyrogram import enums, filters
@@ -51,6 +50,9 @@ try:
         def __init__(self, user_id: int, token: str):
             self.user_id = user_id
             self.token = token
+
+        def __repr__(self):
+            return f"<UserGitHubToken {self.user_id}>"
 
     UserGitHubToken.__table__.create(bind=engine, checkfirst=True)
 
@@ -109,6 +111,7 @@ except Exception as e:
 
 
 def auth_headers(token: str | None = None) -> dict:
+    """Build request headers with optional GitHub authorization token."""
     h = dict(BASE_HEADERS)
     if token:
         h["Authorization"] = f"token {token}"
@@ -133,6 +136,18 @@ def parse_repo_input(raw: str):
     return None, None
 
 
+async def safe_edit_text(message: Message, text: str, reply_markup=None):
+    """Safely edit message text ignoring Telegram identical message errors."""
+    try:
+        return await message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
+
+
 # -----------------------------------------------------------------------------
 # Active Sessions Store for Interactive GitPush
 # -----------------------------------------------------------------------------
@@ -151,17 +166,17 @@ async def set_git_token(_, message: Message):
         except Exception:
             pass
         return await message.reply(
-            "🔒 **Security Alert:** Please set your GitHub Token in **Private Chat (PM)** to protect your credentials!"
+            "🔒 **Security Warning:** Please configure your GitHub Token in **Private Chat (PM)** to keep your token secure!"
         )
 
     if len(message.command) < 2:
         return await message.reply(
             "❌ **Please provide your GitHub Personal Access Token (PAT)!**\n\n"
             "**Usage:** `/setgitoken <your_token>`\n\n"
-            "👉 **How to create a token:**\n"
+            "👉 **How to generate a token:**\n"
             "1. Visit [GitHub Token Settings](https://github.com/settings/tokens/new)\n"
-            "2. Select **`repo`** scope (Full control of private repositories)\n"
-            "3. Generate and paste it here."
+            "2. Enable the **`repo`** scope (Full control of private repositories)\n"
+            "3. Click **Generate Token** and send it here."
         )
 
     token = message.command[1].strip()
@@ -175,24 +190,26 @@ async def set_git_token(_, message: Message):
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status != 200:
-                    return await status_msg.edit(
+                    return await safe_edit_text(
+                        status_msg,
                         "❌ **Invalid or expired GitHub Token!**\n"
-                        "Please verify your token has valid `repo` permissions and try again."
+                        "Please verify your token has valid `repo` scope permissions and try again.",
                     )
                 user_data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ **Error connecting to GitHub:** `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ **Error connecting to GitHub:** `{e}`")
 
     login = user_data.get("login", "Unknown")
     name = user_data.get("name") or login
     set_user_token(message.from_user.id, token)
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         f"✅ **GitHub Token saved successfully!**\n\n"
         f"👤 **Account:** `@{login}` ({name})\n"
         f"📦 **Public Repos:** `{user_data.get('public_repos', 0)}`\n"
         f"🔒 **Private Repos:** `{user_data.get('total_private_repos', 0)}`\n\n"
-        f"Now you can use `/gitpush` to push code directly to your GitHub account!"
+        f"You can now download private repos via `/dlrepo` and push projects via `/gitpush`!",
     )
 
 
@@ -202,7 +219,7 @@ async def my_git_token(_, message: Message):
     if not token:
         return await message.reply(
             "❌ **No GitHub Token configured.**\n"
-            "Use `/setgitoken <token>` in Private Chat (PM) to configure your personal token."
+            "Send `/setgitoken <token>` in **Private Chat (PM)** to configure your personal token."
         )
 
     try:
@@ -218,8 +235,9 @@ async def my_git_token(_, message: Message):
                     hidden_token = token[:7] + "..." + token[-4:]
                     return await message.reply(
                         f"🔑 **GitHub Token Status**\n\n"
-                        f"👤 **Logged in as:** `@{login}`\n"
-                        f"🔒 **Token Key:** `{hidden_token}`",
+                        f"👤 **Connected as:** `@{login}`\n"
+                        f"🔒 **Token Key:** `{hidden_token}`\n"
+                        f"📦 **Private Repos Access:** Enabled",
                         reply_markup=InlineKeyboardMarkup(
                             [[InlineKeyboardButton("🗑️ Clear My Token", callback_data="clear_gitoken")]]
                         ),
@@ -227,7 +245,7 @@ async def my_git_token(_, message: Message):
     except Exception:
         pass
 
-    await message.reply("⚠️ Token is configured but could not fetch account status from GitHub.")
+    await message.reply("⚠️ Token is saved in database but could not reach GitHub API.")
 
 
 @bot.on_message(filters.command(["cleargitoken", "delgitoken"]))
@@ -235,14 +253,14 @@ async def clear_git_token(_, message: Message):
     if del_user_token(message.from_user.id):
         await message.reply("🗑️ **Your personal GitHub Token has been removed successfully.**")
     else:
-        await message.reply("ℹ️ You didn't have any personal GitHub Token saved.")
+        await message.reply("ℹ️ You do not have any saved GitHub Token.")
 
 
 @bot.on_callback_query(filters.regex(r"^clear_gitoken$"))
 async def cb_clear_gitoken(_, query: CallbackQuery):
     del_user_token(query.from_user.id)
     await query.answer("Token removed!")
-    await query.message.edit_text("🗑️ **Your personal GitHub Token has been removed.**")
+    await safe_edit_text(query.message, "🗑️ **Your personal GitHub Token has been removed.**")
 
 
 # =============================================================================
@@ -255,17 +273,17 @@ async def gitpush_start(_, message: Message):
     if not reply or not reply.document:
         return await message.reply(
             "❌ **Please reply to a `.zip` file to push it to GitHub!**\n\n"
-            "**Usage:** Reply to a `.zip` with `/gitpush <reponame>`\n"
-            "**Example:** `/gitpush MyAwesomeBot`"
+            "**Usage:** Reply to a `.zip` archive with `/gitpush <reponame>`\n"
+            "**Example:** `/gitpush MyAwesomeProject`"
         )
 
     doc = reply.document
     fname = doc.file_name or ""
     if not (fname.lower().endswith(".zip") or doc.mime_type == "application/zip"):
-        return await message.reply("❌ The replied document must be a **.zip** file archive.")
+        return await message.reply("❌ The replied file must be a valid **.zip** archive.")
 
     if doc.file_size > 50 * 1024 * 1024:
-        return await message.reply("❌ File is too large. Maximum supported zip archive size is 50MB.")
+        return await message.reply("❌ File is too large. Maximum supported archive size is 50MB.")
 
     token = get_user_token(message.from_user.id)
     if not token:
@@ -278,7 +296,7 @@ async def gitpush_start(_, message: Message):
             "`/setgitoken <your_token>`"
         )
 
-    # Verify token & get login name
+    # Validate token & fetch username
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -288,7 +306,7 @@ async def gitpush_start(_, message: Message):
             ) as resp:
                 if resp.status != 200:
                     return await message.reply(
-                        "❌ **GitHub Token authentication failed!** Please update it with `/setgitoken <token>`."
+                        "❌ **GitHub Token authentication failed!** Please update your token using `/setgitoken <token>` in PM."
                     )
                 user_info = await resp.json()
     except Exception as e:
@@ -306,7 +324,7 @@ async def gitpush_start(_, message: Message):
     if not reponame:
         reponame = "MyProject"
 
-    # Save Session State
+    # Initialize Push Session
     user_id = message.from_user.id
     GITPUSH_SESSIONS[user_id] = {
         "reply_msg_id": reply.id,
@@ -320,6 +338,7 @@ async def gitpush_start(_, message: Message):
         "branch": "main",
         "commit_msg": "feat: initial commit via MeowRobot",
         "waiting_custom": None,
+        "prompt_msg_id": None,
     }
 
     # Step 1: Ask Visibility (Private or Public)
@@ -331,14 +350,15 @@ async def gitpush_start(_, message: Message):
         [InlineKeyboardButton("❌ Cancel", callback_data=f"gpush_cancel_{user_id}")],
     ])
 
-    await message.reply(
+    prompt = await message.reply(
         f"🐙 **GitHub Push Setup**\n\n"
         f"📦 **Repository Name:** `{reponame}`\n"
         f"👤 **Target Account:** `@{login}`\n"
-        f"📁 **Archive:** `{fname}` ({round(doc.file_size / (1024 * 1024), 2)} MB)\n\n"
+        f"📁 **Archive File:** `{fname}` ({round(doc.file_size / (1024 * 1024), 2)} MB)\n\n"
         f"🔒 **Step 1/3: Choose Repository Visibility:**",
         reply_markup=keyboard,
     )
+    GITPUSH_SESSIONS[user_id]["prompt_msg_id"] = prompt.id
 
 
 @bot.on_callback_query(filters.regex(r"^gpush_vis_(private|public)_(\d+)$"))
@@ -351,7 +371,7 @@ async def cb_gitpush_visibility(_, query: CallbackQuery):
 
     session = GITPUSH_SESSIONS.get(target_user_id)
     if not session:
-        return await query.answer("❌ Session expired. Please run /gitpush again.", show_alert=True)
+        return await query.answer("❌ Session expired. Please send /gitpush again.", show_alert=True)
 
     session["visibility"] = vis
     await query.answer(f"Visibility: {vis.capitalize()}")
@@ -368,7 +388,8 @@ async def cb_gitpush_visibility(_, query: CallbackQuery):
         ],
     ])
 
-    await query.message.edit_text(
+    await safe_edit_text(
+        query.message,
         f"🐙 **GitHub Push Setup**\n\n"
         f"📦 **Repository:** `{session['reponame']}` (`{vis.capitalize()}`)\n"
         f"👤 **Target Account:** `@{session['login']}`\n\n"
@@ -391,10 +412,12 @@ async def cb_gitpush_branch(_, query: CallbackQuery):
 
     if br_choice == "custom":
         session["waiting_custom"] = "branch"
+        session["prompt_msg_id"] = query.message.id
         await query.answer()
-        return await query.message.edit_text(
+        return await safe_edit_text(
+            query.message,
             f"🐙 **Custom Branch Name**\n\n"
-            f"Please **reply to this message** with your desired branch name (e.g. `develop` or `v2`).",
+            f"Please **reply to this message** with your desired branch name (e.g. `develop` or `v2.0`).",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("❌ Cancel", callback_data=f"gpush_cancel_{target_user_id}")]
             ]),
@@ -406,7 +429,7 @@ async def cb_gitpush_branch(_, query: CallbackQuery):
 
 
 async def prompt_commit_step(message: Message, session: dict, target_user_id: int):
-    # Step 3: Ask Commit Name
+    # Step 3: Ask Commit Message
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
@@ -423,12 +446,13 @@ async def prompt_commit_step(message: Message, session: dict, target_user_id: in
         [InlineKeyboardButton("❌ Cancel", callback_data=f"gpush_cancel_{target_user_id}")],
     ])
 
-    await message.edit_text(
+    await safe_edit_text(
+        message,
         f"🐙 **GitHub Push Setup**\n\n"
         f"📦 **Repository:** `{session['reponame']}` (`{session['visibility'].capitalize()}`)\n"
         f"👤 **Account:** `@{session['login']}`\n"
         f"🌿 **Branch:** `{session['branch']}`\n\n"
-        f"💬 **Step 3/3: Select or Enter Commit Name:**",
+        f"💬 **Step 3/3: Select or Enter Commit Message:**",
         reply_markup=keyboard,
     )
 
@@ -447,10 +471,12 @@ async def cb_gitpush_commit(_, query: CallbackQuery):
 
     if cm_choice == "custom":
         session["waiting_custom"] = "commit"
+        session["prompt_msg_id"] = query.message.id
         await query.answer()
-        return await query.message.edit_text(
-            f"🐙 **Custom Commit Name**\n\n"
-            f"Please **reply to this message** with your desired commit message (e.g. `feat: initial release v1.0`).",
+        return await safe_edit_text(
+            query.message,
+            f"🐙 **Custom Commit Message**\n\n"
+            f"Please **reply to this message** with your desired commit message (e.g. `feat: initial release`).",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("❌ Cancel", callback_data=f"gpush_cancel_{target_user_id}")]
             ]),
@@ -469,7 +495,7 @@ async def cb_gitpush_cancel(_, query: CallbackQuery):
 
     GITPUSH_SESSIONS.pop(target_user_id, None)
     await query.answer("Cancelled!")
-    await query.message.edit_text("❌ **GitHub Push operation cancelled.**")
+    await safe_edit_text(query.message, "❌ **GitHub Push operation cancelled.**")
 
 
 @bot.on_message(filters.reply & ~filters.bot)
@@ -480,23 +506,28 @@ async def handle_custom_text_input(_, message: Message):
     if not session or not session.get("waiting_custom"):
         return
 
+    # Ensure reply is to the bot's prompt message
+    if session.get("prompt_msg_id") and message.reply_to_message.id != session["prompt_msg_id"]:
+        return
+
     text = message.text.strip()
     if session["waiting_custom"] == "branch":
         branch_clean = re.sub(r"[^a-zA-Z0-9_.-]", "-", text)
         session["branch"] = branch_clean or "main"
         session["waiting_custom"] = None
         prompt_msg = await message.reply("✅ Branch name registered!")
+        session["prompt_msg_id"] = prompt_msg.id
         await prompt_commit_step(prompt_msg, session, user_id)
 
     elif session["waiting_custom"] == "commit":
-        session["commit_msg"] = text or "feat: update via MeowRobot"
+        session["commit_msg"] = text or "feat: initial commit via MeowRobot"
         session["waiting_custom"] = None
         status_msg = await message.reply("✅ Commit message registered! Starting push...")
         await execute_git_push(status_msg, session, user_id)
 
 
 async def execute_git_push(status_msg: Message, session: dict, user_id: int):
-    """Download, extract, create repo on GitHub, and push."""
+    """Download archive, extract, create GitHub repository, and push."""
     reponame = session["reponame"]
     login = session["login"]
     token = session["token"]
@@ -511,14 +542,14 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
     extract_dir = os.path.join(temp_dir, "extracted")
 
     try:
-        await status_msg.edit_text("⏳ **[1/4]** Downloading `.zip` file from Telegram...")
+        await safe_edit_text(status_msg, "⏳ **[1/4]** Downloading `.zip` archive from Telegram...")
         source_msg = await bot.get_messages(chat_id, reply_msg_id)
         if not source_msg or not source_msg.document:
-            return await status_msg.edit_text("❌ Could not retrieve original file from Telegram.")
+            return await safe_edit_text(status_msg, "❌ Could not retrieve original file from Telegram.")
 
         await source_msg.download(file_name=zip_path)
 
-        await status_msg.edit_text("📦 **[2/4]** Extracting repository contents...")
+        await safe_edit_text(status_msg, "📦 **[2/4]** Extracting repository contents...")
         os.makedirs(extract_dir, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(extract_dir)
@@ -529,18 +560,17 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
         if len(items) == 1 and os.path.isdir(os.path.join(extract_dir, items[0])):
             root_dir = os.path.join(extract_dir, items[0])
 
-        # Remove existing .git folder to avoid corrupted index
+        # Remove existing .git folder to start clean
         existing_git = os.path.join(root_dir, ".git")
         if os.path.exists(existing_git):
             shutil.rmtree(existing_git, ignore_errors=True)
 
-        await status_msg.edit_text(f"🌐 **[3/4]** Creating/verifying repository `{reponame}` on GitHub...")
+        await safe_edit_text(status_msg, f"🌐 **[3/4]** Creating/verifying repository `{reponame}` on GitHub...")
         async with aiohttp.ClientSession() as http_sess:
-            # Check if repo exists
             check_url = f"{GITHUB_API_URL}/repos/{login}/{reponame}"
             async with http_sess.get(check_url, headers=auth_headers(token)) as r_chk:
                 if r_chk.status == 404:
-                    # Create repo
+                    # Create new repository
                     create_url = f"{GITHUB_API_URL}/user/repos"
                     payload = {
                         "name": reponame,
@@ -551,20 +581,20 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
                     async with http_sess.post(create_url, json=payload, headers=auth_headers(token)) as r_cr:
                         if r_cr.status not in (200, 201):
                             err_resp = await r_cr.text()
-                            return await status_msg.edit_text(
-                                f"❌ **Failed to create GitHub repository:** HTTP {r_cr.status}\n`{err_resp[:200]}`"
+                            return await safe_edit_text(
+                                status_msg,
+                                f"❌ **Failed to create GitHub repository:** HTTP {r_cr.status}\n`{err_resp[:200]}`",
                             )
 
-        await status_msg.edit_text(f"🚀 **[4/4]** Initializing git & pushing to branch `{branch}`...")
+        await safe_edit_text(status_msg, f"🚀 **[4/4]** Initializing git & pushing to branch `{branch}`...")
 
         def _run_git_commands():
-            cmd_env = os.environ.copy()
             subprocess.run(["git", "init"], cwd=root_dir, check=True, capture_output=True)
             subprocess.run(["git", "config", "user.name", login], cwd=root_dir, check=True)
             subprocess.run(["git", "config", "user.email", f"{login}@users.noreply.github.com"], cwd=root_dir, check=True)
             subprocess.run(["git", "checkout", "-B", branch], cwd=root_dir, check=True, capture_output=True)
             subprocess.run(["git", "add", "-A"], cwd=root_dir, check=True)
-            subprocess.run(["git", "commit", "-m", commit_msg], cwd=root_dir, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", commit_msg, "--allow-empty"], cwd=root_dir, check=True, capture_output=True)
             remote_url = f"https://{token}@github.com/{login}/{reponame}.git"
             subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=root_dir, check=True)
             push_res = subprocess.run(
@@ -574,18 +604,17 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
                 text=True,
             )
             if push_res.returncode != 0:
-                # Sanitize token from output
                 clean_err = push_res.stderr.replace(token, "[REDACTED_TOKEN]")
                 raise Exception(clean_err)
 
         await asyncio.to_thread(_run_git_commands)
 
-        # Count total pushed files
         total_files = sum(len(files) for _, _, files in os.walk(root_dir) if ".git" not in _)
         repo_link = f"https://github.com/{login}/{reponame}"
         vis_icon = "🔒 Private" if visibility == "private" else "🌍 Public"
 
-        await status_msg.edit_text(
+        await safe_edit_text(
+            status_msg,
             f"✅ **Successfully Pushed to GitHub!** 🎉\n\n"
             f"📦 **Repository:** [{login}/{reponame}]({repo_link})\n"
             f"🔒 **Visibility:** `{vis_icon}`\n"
@@ -597,13 +626,12 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🌐 Open Repository", url=repo_link)]
             ]),
-            disable_web_page_preview=False,
         )
 
     except Exception as e:
         safe_err = str(e).replace(token, "[TOKEN_REDACTED]") if token else str(e)
         LOGGER.error(f"[GitPush Error]: {safe_err}")
-        await status_msg.edit_text(f"❌ **Error during Git Push:**\n`{safe_err[:300]}`")
+        await safe_edit_text(status_msg, f"❌ **Error during Git Push:**\n`{safe_err[:300]}`")
 
     finally:
         GITPUSH_SESSIONS.pop(user_id, None)
@@ -612,7 +640,7 @@ async def execute_git_push(status_msg: Message, session: dict, user_id: int):
 
 
 # =============================================================================
-# 3. GITHUB EXPLORATION & UTILITY COMMANDS
+# 3. GITHUB EXPLORATION & UTILITY COMMANDS (Supports Public & Private Repos)
 # =============================================================================
 
 @bot.on_message(filters.command(["git", "github"]))
@@ -636,18 +664,19 @@ async def git_user_info(_, message: Message):
         )
 
     status_msg = await message.reply(f"🔍 Searching GitHub for `@{username}`...")
-
+    token = get_user_token(message.from_user.id)
     url = f"{GITHUB_API_URL}/users/{username}"
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ **GitHub user** `@{username}` **not found.**")
+                    return await safe_edit_text(status_msg, f"❌ **GitHub user** `@{username}` **not found.**")
                 if resp.status != 200:
-                    return await status_msg.edit(f"⚠️ **GitHub API error:** HTTP {resp.status}")
+                    return await safe_edit_text(status_msg, f"⚠️ **GitHub API error:** HTTP {resp.status}")
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ **Error connecting to GitHub:** `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ **Error connecting to GitHub:** `{e}`")
 
     name = data.get("name") or username
     login = data.get("login", username)
@@ -687,19 +716,11 @@ async def git_user_info(_, message: Message):
     await status_msg.delete()
     if avatar_url:
         try:
-            return await message.reply_photo(
-                photo=avatar_url,
-                caption=caption,
-                reply_markup=keyboard,
-            )
+            return await message.reply_photo(photo=avatar_url, caption=caption, reply_markup=keyboard)
         except Exception:
             pass
 
-    return await message.reply_text(
-        caption,
-        reply_markup=keyboard,
-        disable_web_page_preview=True,
-    )
+    return await message.reply_text(caption, reply_markup=keyboard, disable_web_page_preview=True)
 
 
 @bot.on_message(filters.command(["allrepo", "allrepos", "repos"]))
@@ -727,37 +748,38 @@ async def all_repos_handler(_, message: Message):
 
 
 async def send_user_repositories(message: Message, username: str, status_msg=None):
+    token = get_user_token(message.from_user.id)
     url = f"{GITHUB_API_URL}/users/{username}/repos?per_page=100&sort=updated"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status == 404:
                     text = f"❌ **GitHub user** `@{username}` **not found.**"
                     if status_msg:
-                        return await status_msg.edit(text)
+                        return await safe_edit_text(status_msg, text)
                     return await message.reply(text)
                 if resp.status != 200:
                     text = f"⚠️ **GitHub API error:** HTTP {resp.status}"
                     if status_msg:
-                        return await status_msg.edit(text)
+                        return await safe_edit_text(status_msg, text)
                     return await message.reply(text)
                 repos = await resp.json()
     except Exception as e:
         text = f"⚠️ **Error connecting to GitHub:** `{e}`"
         if status_msg:
-            return await status_msg.edit(text)
+            return await safe_edit_text(status_msg, text)
         return await message.reply(text)
 
     if not repos:
         text = f"ℹ️ **User** `@{username}` **has no public repositories.**"
         if status_msg:
-            return await status_msg.edit(text)
+            return await safe_edit_text(status_msg, text)
         return await message.reply(text)
 
     total_count = len(repos)
     display_limit = 12
     output_lines = [
-        f"📦 **Public Repositories of [{username}](https://github.com/{username})** ({total_count} total):\n"
+        f"📦 **Repositories of [{username}](https://github.com/{username})** ({total_count} total):\n"
     ]
 
     for idx, r in enumerate(repos[:display_limit], 1):
@@ -790,7 +812,7 @@ async def send_user_repositories(message: Message, username: str, status_msg=Non
     ])
 
     if status_msg:
-        await status_msg.edit(text_body, reply_markup=keyboard, disable_web_page_preview=True)
+        await safe_edit_text(status_msg, text_body, reply_markup=keyboard)
     else:
         await message.reply(text_body, reply_markup=keyboard, disable_web_page_preview=True)
 
@@ -804,6 +826,7 @@ async def cb_allrepo_fetch(_, query: CallbackQuery):
 
 @bot.on_message(filters.command(["dlrepo", "gitdl"]))
 async def dlrepo_handler(_, message: Message):
+    """Download entire repository as .zip (Supports both Public and Private repositories via user token)."""
     raw_target = None
     if len(message.command) > 1:
         raw_target = message.command[1].strip()
@@ -819,38 +842,51 @@ async def dlrepo_handler(_, message: Message):
         return await message.reply(
             "❌ **Please provide a repository URL or owner/repo!**\n\n"
             "**Usage:** `/dlrepo <repo_url or owner/repo>`\n"
-            "**Example:** `/dlrepo Kanha-Team/MeowRobot`"
+            "**Example:** `/dlrepo Kanha-Team/MeowRobot`\n\n"
+            "💡 **Tip:** Set your GitHub token via `/setgitoken` in PM to download **private repositories** too!"
         )
 
     owner, repo = parse_repo_input(raw_target)
     if not owner or not repo:
         return await message.reply("❌ Invalid format! Provide `owner/repo` or a valid GitHub URL.")
 
+    token = get_user_token(message.from_user.id)
     status_msg = await message.reply(f"🔍 Fetching repository details for `{owner}/{repo}`...")
     repo_url = f"{GITHUB_API_URL}/repos/{owner}/{repo}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(repo_url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(repo_url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ Repository `{owner}/{repo}` not found or is private.")
+                    if not token:
+                        return await safe_edit_text(
+                            status_msg,
+                            f"❌ Repository `{owner}/{repo}` not found.\n\n"
+                            f"🔒 If this is a **Private Repository**, please configure your token via `/setgitoken <token>` in PM first.",
+                        )
+                    return await safe_edit_text(
+                        status_msg,
+                        f"❌ Repository `{owner}/{repo}` not found or your token lacks permission to access it.",
+                    )
                 if resp.status != 200:
-                    return await status_msg.edit(f"⚠️ GitHub API error: HTTP {resp.status}")
+                    return await safe_edit_text(status_msg, f"⚠️ GitHub API error: HTTP {resp.status}")
                 repo_data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     default_branch = repo_data.get("default_branch", "master")
     full_name = repo_data.get("full_name", f"{owner}/{repo}")
     stars = repo_data.get("stargazers_count", 0)
     forks = repo_data.get("forks_count", 0)
     desc = repo_data.get("description") or "No description provided."
+    is_private = repo_data.get("private", False)
     size_kb = repo_data.get("size", 0)
 
     if size_kb > 300 * 1024:
-        return await status_msg.edit(f"⚠️ Repository archive is too large (~{round(size_kb / 1024, 1)} MB).")
+        return await safe_edit_text(status_msg, f"⚠️ Repository archive is too large (~{round(size_kb / 1024, 1)} MB).")
 
-    await status_msg.edit(f"⏳ Downloading `{full_name}` (Branch: `{default_branch}`)...")
+    vis_label = "🔒 Private" if is_private else "🌍 Public"
+    await safe_edit_text(status_msg, f"⏳ Downloading `{full_name}` ({vis_label}, Branch: `{default_branch}`)...")
 
     zip_url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/zipball/{default_branch}"
     temp_dir = tempfile.gettempdir()
@@ -858,9 +894,14 @@ async def dlrepo_handler(_, message: Message):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(zip_url, headers=BASE_HEADERS, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+            async with session.get(
+                zip_url,
+                headers=auth_headers(token),
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=180),
+            ) as resp:
                 if resp.status != 200:
-                    return await status_msg.edit(f"❌ Failed to download archive: HTTP {resp.status}")
+                    return await safe_edit_text(status_msg, f"❌ Failed to download archive: HTTP {resp.status}")
                 with open(file_path, "wb") as f:
                     while True:
                         chunk = await resp.content.read(64 * 1024)
@@ -870,12 +911,16 @@ async def dlrepo_handler(_, message: Message):
 
         file_size = os.path.getsize(file_path)
         if file_size > 50 * 1024 * 1024:
-            return await status_msg.edit(f"❌ Archive is too large ({round(file_size / (1024 * 1024), 2)} MB) for Telegram upload.")
+            return await safe_edit_text(
+                status_msg,
+                f"❌ Archive is too large ({round(file_size / (1024 * 1024), 2)} MB) for Telegram upload.",
+            )
 
-        await status_msg.edit("📤 Uploading repository archive to Telegram...")
+        await safe_edit_text(status_msg, "📤 Uploading repository archive to Telegram...")
 
         caption = (
             f"📦 **Repository:** [{full_name}](https://github.com/{owner}/{repo})\n"
+            f"🔒 **Visibility:** `{vis_label}`\n"
             f"🌿 **Branch:** `{default_branch}`\n"
             f"⭐ **Stars:** `{stars}` | 🍴 **Forks:** `{forks}`\n"
             f"📝 **Description:** _{desc}_\n\n"
@@ -893,7 +938,7 @@ async def dlrepo_handler(_, message: Message):
         await status_msg.delete()
 
     except Exception as e:
-        await status_msg.edit(f"❌ Error: `{e}`")
+        await safe_edit_text(status_msg, f"❌ Error: `{e}`")
 
     finally:
         if os.path.exists(file_path):
@@ -916,17 +961,21 @@ async def repo_info_handler(_, message: Message):
     if not owner or not repo:
         return await message.reply("❌ Invalid format! Please use `/repo <owner/repo>`.")
 
+    token = get_user_token(message.from_user.id)
     status_msg = await message.reply(f"🔍 Fetching `{owner}/{repo}`...")
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ Repository `{owner}/{repo}` not found.")
+                    return await safe_edit_text(
+                        status_msg,
+                        f"❌ Repository `{owner}/{repo}` not found.\n(If private, configure token via `/setgitoken`).",
+                    )
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     full_name = data.get("full_name")
     html_url = data.get("html_url")
@@ -942,10 +991,12 @@ async def repo_info_handler(_, message: Message):
     created = data.get("created_at", "")[:10]
     updated = data.get("updated_at", "")[:10]
     clone_url = data.get("clone_url")
+    vis = "🔒 Private" if data.get("private") else "🌍 Public"
 
     text = (
         f"📦 **Repository Information**\n\n"
         f"🏷️ **Name:** [{full_name}]({html_url})\n"
+        f"🔒 **Visibility:** `{vis}`\n"
         f"📝 **Description:** _{desc}_\n\n"
         f"⭐ **Stars:** `{stars}` | 🍴 **Forks:** `{forks}`\n"
         f"🐛 **Open Issues:** `{issues}` | 👁️ **Watchers:** `{watchers}`\n"
@@ -955,7 +1006,8 @@ async def repo_info_handler(_, message: Message):
         f"📥 **Clone URL:**\n`{clone_url}`"
     )
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         text,
         reply_markup=InlineKeyboardMarkup([
             [
@@ -963,7 +1015,6 @@ async def repo_info_handler(_, message: Message):
                 InlineKeyboardButton("📥 Download Zip", callback_data=f"dlrepo_{owner}_{repo}"),
             ]
         ]),
-        disable_web_page_preview=True,
     )
 
 
@@ -972,7 +1023,6 @@ async def cb_quick_dlrepo(_, query: CallbackQuery):
     owner = query.matches[0].group(1)
     repo = query.matches[0].group(2)
     await query.answer("Preparing download...")
-    # Trigger dlrepo flow
     query.message.command = ["dlrepo", f"{owner}/{repo}"]
     await dlrepo_handler(_, query.message)
 
@@ -988,18 +1038,19 @@ async def search_repo_handler(_, message: Message):
 
     query = " ".join(message.command[1:]).strip()
     status_msg = await message.reply(f"🔍 Searching GitHub for `{query}`...")
-
+    token = get_user_token(message.from_user.id)
     url = f"{GITHUB_API_URL}/search/repositories?q={query}&per_page=7&sort=stars"
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     items = data.get("items", [])
     if not items:
-        return await status_msg.edit(f"ℹ️ No repositories found for `{query}`.")
+        return await safe_edit_text(status_msg, f"ℹ️ No repositories found for `{query}`.")
 
     text_lines = [f"🔍 **GitHub Search Results for:** `{query}`\n"]
     for i, r in enumerate(items, 1):
@@ -1018,12 +1069,12 @@ async def search_repo_handler(_, message: Message):
             f"   _{r_desc}_\n"
         )
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         "\n".join(text_lines),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 Open Search on GitHub", url=f"https://github.com/search?q={query}")]
         ]),
-        disable_web_page_preview=True,
     )
 
 
@@ -1041,40 +1092,40 @@ async def git_file_handler(_, message: Message):
     if not owner or not repo:
         return await message.reply("❌ Invalid repository format!")
 
+    token = get_user_token(message.from_user.id)
     status_msg = await message.reply(f"🔍 Fetching `{file_path}` from `{owner}/{repo}`...")
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{file_path}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ File `{file_path}` not found in `{owner}/{repo}`.")
+                    return await safe_edit_text(status_msg, f"❌ File `{file_path}` not found in `{owner}/{repo}`.")
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     download_url = data.get("download_url")
     if not download_url:
-        return await status_msg.edit("❌ Could not obtain raw file download URL.")
+        return await safe_edit_text(status_msg, "❌ Could not obtain raw file download URL.")
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(download_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            async with session.get(download_url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 content = await resp.read()
 
         if len(content) < 3500:
             try:
                 text_content = content.decode("utf-8")
-                await status_msg.edit(
+                await safe_edit_text(
+                    status_msg,
                     f"📄 **File:** `{file_path}` ([{owner}/{repo}](https://github.com/{owner}/{repo}))\n\n"
                     f"```\n{text_content}\n```",
-                    disable_web_page_preview=True,
                 )
                 return
             except UnicodeDecodeError:
                 pass
 
-        # Send as document if binary or large
         temp_file = os.path.join(tempfile.gettempdir(), os.path.basename(file_path))
         with open(temp_file, "wb") as f:
             f.write(content)
@@ -1088,7 +1139,7 @@ async def git_file_handler(_, message: Message):
             os.remove(temp_file)
 
     except Exception as e:
-        await status_msg.edit(f"⚠️ Failed to send file: `{e}`")
+        await safe_edit_text(status_msg, f"⚠️ Failed to send file: `{e}`")
 
 
 @bot.on_message(filters.command(["release", "gitrelease"]))
@@ -1104,17 +1155,18 @@ async def release_handler(_, message: Message):
     if not owner or not repo:
         return await message.reply("❌ Invalid repository format.")
 
+    token = get_user_token(message.from_user.id)
     status_msg = await message.reply(f"🔍 Fetching latest release for `{owner}/{repo}`...")
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/latest"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"ℹ️ No public releases found for `{owner}/{repo}`.")
+                    return await safe_edit_text(status_msg, f"ℹ️ No public releases found for `{owner}/{repo}`.")
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     tag = data.get("tag_name")
     rel_name = data.get("name") or tag
@@ -1142,10 +1194,10 @@ async def release_handler(_, message: Message):
         f"📦 **Downloads / Assets:**\n{asset_text}"
     )
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         text,
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🌐 View Release Page", url=html_url)]]),
-        disable_web_page_preview=True,
     )
 
 
@@ -1162,20 +1214,21 @@ async def commits_handler(_, message: Message):
     if not owner or not repo:
         return await message.reply("❌ Invalid repository format.")
 
+    token = get_user_token(message.from_user.id)
     status_msg = await message.reply(f"🔍 Fetching recent commits for `{owner}/{repo}`...")
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/commits?per_page=6"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ Repository `{owner}/{repo}` not found.")
+                    return await safe_edit_text(status_msg, f"❌ Repository `{owner}/{repo}` not found.")
                 commits = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     if not commits or not isinstance(commits, list):
-        return await status_msg.edit(f"ℹ️ No commits found for `{owner}/{repo}`.")
+        return await safe_edit_text(status_msg, f"ℹ️ No commits found for `{owner}/{repo}`.")
 
     lines = [f"📜 **Recent Commits in [{owner}/{repo}](https://github.com/{owner}/{repo})**:\n"]
     for c in commits:
@@ -1189,12 +1242,12 @@ async def commits_handler(_, message: Message):
 
         lines.append(f"• [`{sha}`]({c_url}) - **{c_msg}**\n  👤 _{c_author}_ ({c_date})\n")
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 View All Commits", url=f"https://github.com/{owner}/{repo}/commits")]
         ]),
-        disable_web_page_preview=True,
     )
 
 
@@ -1209,19 +1262,20 @@ async def gitstalk_handler(_, message: Message):
 
     username = message.command[1].strip().lstrip("@")
     status_msg = await message.reply(f"🔍 Stalking GitHub activity for `@{username}`...")
+    token = get_user_token(message.from_user.id)
     url = f"{GITHUB_API_URL}/users/{username}/events/public?per_page=7"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ GitHub user `@{username}` not found.")
+                    return await safe_edit_text(status_msg, f"❌ GitHub user `@{username}` not found.")
                 events = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     if not events or not isinstance(events, list):
-        return await status_msg.edit(f"ℹ️ No recent public activity found for `@{username}`.")
+        return await safe_edit_text(status_msg, f"ℹ️ No recent public activity found for `@{username}`.")
 
     lines = [f"🕵️ **Recent Activity for [{username}](https://github.com/{username})**:\n"]
     for ev in events:
@@ -1232,12 +1286,12 @@ async def gitstalk_handler(_, message: Message):
 
         lines.append(f"• **{ev_type}** in [{repo_name}]({repo_link}) ({ev_date})")
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 Open Profile", url=f"https://github.com/{username}")]
         ]),
-        disable_web_page_preview=True,
     )
 
 
@@ -1252,16 +1306,17 @@ async def org_info_handler(_, message: Message):
 
     org_name = message.command[1].strip().lstrip("@")
     status_msg = await message.reply(f"🔍 Fetching organization `@{org_name}`...")
+    token = get_user_token(message.from_user.id)
     url = f"{GITHUB_API_URL}/orgs/{org_name}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=BASE_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(url, headers=auth_headers(token), timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 404:
-                    return await status_msg.edit(f"❌ GitHub organization `@{org_name}` not found.")
+                    return await safe_edit_text(status_msg, f"❌ GitHub organization `@{org_name}` not found.")
                 data = await resp.json()
     except Exception as e:
-        return await status_msg.edit(f"⚠️ Error: `{e}`")
+        return await safe_edit_text(status_msg, f"⚠️ Error: `{e}`")
 
     name = data.get("name") or org_name
     login = data.get("login", org_name)
@@ -1281,7 +1336,8 @@ async def org_info_handler(_, message: Message):
         f"📅 **Created On:** `{created}`"
     )
 
-    await status_msg.edit(
+    await safe_edit_text(
+        status_msg,
         text,
         reply_markup=InlineKeyboardMarkup([
             [
@@ -1289,12 +1345,11 @@ async def org_info_handler(_, message: Message):
                 InlineKeyboardButton("📦 Repositories", url=f"https://github.com/orgs/{login}/repositories"),
             ]
         ]),
-        disable_web_page_preview=True,
     )
 
 
 # =============================================================================
-# 4. MODULE DEFINITION & HELP DOCUMENTATION
+# 4. MODULE DEFINITION & COMPLETE HELP DOCUMENTATION
 # =============================================================================
 
 __mod_name__ = "Github"
@@ -1302,29 +1357,35 @@ __mod_name__ = "Github"
 __help__ = """
 *GitHub Power Suite & Downloader 🐙*
 
-Complete GitHub toolkit to inspect profiles, explore repositories, download files, and push projects directly from Telegram!
+Complete GitHub toolkit to inspect profiles, explore repositories, download source code (public & private), and push projects directly from Telegram!
 
-*Commands:*
- ❍ /git <user>*:* ғɪηᴅ ɢɪᴛʜᴜʙ ᴀᴄᴄᴏᴜɴᴛ.
- ❍ /allrepo <user>*:* ᴧʟʟ ʀєᴘᴏ ʙʏ ɢɪᴛ ᴜsєʀηᴧϻє.
- ❍ /dlrepo <repo_url>*:* ᴅσᴡηʟσᴧᴅ ᴢɪᴘ ʙʏ ʀєᴘᴏ ᴜʀʟ.
- ❍ /gitpush <reponame>*:* ᴘᴜsʜ ᴢɪᴘ ᴛσ ɢɪᴛʜᴜʙ (asks private/public, branch & commit).
- ❍ /setgitoken <token>*:* sєᴛ ʏσᴜʀ ᴘєʀsσηᴧʟ ɢɪᴛʜᴜʙ ᴛσᴋєη (PM only).
- ❍ /mygitoken*:* ᴄʜєᴄᴋ ʏσᴜʀ ᴄᴜʀʀєηᴛ ɢɪᴛʜᴜʙ ᴛσᴋєη sᴛᴧᴛᴜs.
- ❍ /cleargitoken*:* ᴅєʟєᴛє ʏσᴜʀ sᴧᴠєᴅ ɢɪᴛʜᴜʙ ᴛσᴋєη.
- ❍ /repo <owner/repo>*:* ʀєᴘσ ᴅєᴛᴧɪʟs & sᴛᴧᴛs (stars, forks, language).
- ❍ /searchrepo <query>*:* sєᴧʀᴄʜ ɢɪᴛʜᴜʙ ʀєᴘσsɪᴛσʀɪєs.
- ❍ /gitfile <owner/repo> <path>*:* ᴠɪєᴡ/ᴅσᴡηʟσᴧᴅ sɪηɢʟє ғɪʟє.
- ❍ /release <owner/repo>*:* ʟᴧᴛєsᴛ ʀєʟєᴧsє & ᴧssєᴛs (.apk, .zip).
- ❍ /commits <owner/repo>*:* ʀєᴄєηᴛ ᴄσϻϻɪᴛs ʜɪsᴛσʀʏ.
- ❍ /gitstalk <user>*:* ᴜsєʀ ᴧᴄᴛɪᴠɪᴛʏ & sᴛᴧʟᴋ.
- ❍ /org <org_name>*:* ɢɪᴛʜᴜʙ σʀɢᴧηɪᴢᴧᴛɪση ɪηғσ.
+*Account & Token:*
+ ❍ /setgitoken <token>*:* Set your personal GitHub token in PM (enables push & private repos).
+ ❍ /mygitoken*:* Check your current saved token & linked account.
+ ❍ /cleargitoken*:* Remove your saved GitHub token.
+
+*Profile & Users:*
+ ❍ /git <user>*:* View user profile, bio, stats & avatar.
+ ❍ /allrepo <user>*:* List all repositories of a user.
+ ❍ /gitstalk <user>*:* Track recent GitHub activity & events.
+ ❍ /org <org>*:* View GitHub organization details & repos.
+
+*Repositories & Code:*
+ ❍ /repo <owner/repo>*:* Detailed repo stats (stars, forks, issues).
+ ❍ /searchrepo <query>*:* Search GitHub repositories by keyword.
+ ❍ /gitfile <owner/repo> <path>*:* View or download a single file.
+ ❍ /commits <owner/repo>*:* View recent commit history.
+ ❍ /release <owner/repo>*:* View latest release & download assets.
+
+*Download & Push:*
+ ❍ /dlrepo <repo_url>*:* Download entire repo as .zip (supports private repos if token is set).
+ ❍ /gitpush <reponame>*:* Reply to any .zip to push to GitHub (interactively chooses private/public, branch, and commit).
 
 *Interactive Push Flow:*
 Reply to any `.zip` file with `/gitpush <reponame>`.
-Bot will interactively ask:
+Bot will interactively prompt:
  1. 🔒 Private or 🌍 Public
  2. 🌿 Branch name (`main`, `master` or custom)
  3. 💬 Commit name (default or custom)
-Then automatically push to your GitHub!
+Then automatically create & push to your GitHub!
 """
