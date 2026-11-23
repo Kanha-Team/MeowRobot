@@ -341,6 +341,17 @@ MeowRobot ships with **over 60 modular extensions**. Below is the complete categ
 | `/git <username>` | Everyone | ғɪηᴅ ɢɪᴛʜᴜʙ ᴀᴄᴄᴏᴜɴᴛ (bio, repos, stats, avatar) |
 | `/allrepo <username>` | Everyone | ᴧʟʟ ʀєᴘᴏ ʙʏ ɢɪᴛ ᴜsєʀηᴧϻє (list public repos) |
 | `/dlrepo <repo_url>` | Everyone | ᴅσᴡηʟσᴧᴅ ᴢɪᴘ ʙʏ ʀєᴘᴏ ᴜʀʟ or `owner/repo` |
+| `/gitpush <reponame>` | Everyone | ᴘᴜsʜ ᴢɪᴘ ᴛσ ɢɪᴛʜᴜʙ (interactive private/public, branch & commit) |
+| `/setgitoken <token>` | Everyone | sєᴛ ʏσᴜʀ ᴘєʀsσηᴧʟ ɢɪᴛʜᴜʙ ᴛσᴋєη (PM only) |
+| `/mygitoken` | Everyone | ᴄʜєᴄᴋ ʏσᴜʀ ᴄᴜʀʀєηᴛ ɢɪᴛʜᴜʙ ᴛσᴋєη sᴛᴧᴛᴜs |
+| `/cleargitoken` | Everyone | ᴅєʟєᴛє ʏσᴜʀ sᴧᴠєᴅ ɢɪᴛʜᴜʙ ᴛσᴋєη |
+| `/repo <owner/repo>` | Everyone | ʀєᴘσ ᴅєᴛᴧɪʟs & sᴛᴧᴛs (stars, forks, open issues) |
+| `/searchrepo <query>` | Everyone | sєᴧʀᴄʜ ɢɪᴛʜᴜʙ ʀєᴘσsɪᴛσʀɪєs |
+| `/gitfile <repo> <path>`| Everyone | ᴠɪєᴡ/ᴅσᴡηʟσᴧᴅ sɪηɢʟє ғɪʟє from repository |
+| `/release <owner/repo>`| Everyone | ʟᴧᴛєsᴛ ɢɪᴛʜᴜʙ ʀєʟєᴧsє & ᴧssєᴛs (.apk, .zip) |
+| `/commits <owner/repo>`| Everyone | ʀєᴄєηᴛ ᴄσϻϻɪᴛs ʜɪsᴛσʀʏ |
+| `/gitstalk <username>` | Everyone | ᴜsєʀ ᴧᴄᴛɪᴠɪᴛʏ & sᴛᴧʟᴋ on GitHub |
+| `/org <org_name>` | Everyone | ɢɪᴛʜᴜʙ σʀɢᴧηɪᴢᴧᴛɪση ɪηғσ & repos |
 | `/tgm` or `/tm` (reply)| Everyone | Upload photo/video/doc to Catbox/Telegraph CDN |
 | `/tempmail` | Everyone | Generate a temporary disposable email address |
 | `/checkmail <email>`| Everyone | Check incoming inbox messages for temp email |
