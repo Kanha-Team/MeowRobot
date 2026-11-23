@@ -26,11 +26,10 @@ from pyrogram.types import (
     Message,
 )
 
-from MeowRobot import DEV_USERS, DRAGONS, LOGGER, OWNER_ID
+from MeowRobot import LOGGER
 from MeowRobot import pbot as bot
 
 GITHUB_API_URL = "https://api.github.com"
-DEFAULT_GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", None)
 BASE_HEADERS = {
     "User-Agent": "MeowRobot-TelegramBot",
     "Accept": "application/vnd.github.v3+json",
@@ -107,17 +106,6 @@ except Exception as e:
 
     def del_user_token(user_id: int):
         return _MEM_TOKENS.pop(user_id, None) is not None
-
-
-def get_effective_token(user_id: int):
-    """Retrieve personal token or fallback to owner token for sudo/owner."""
-    token = get_user_token(user_id)
-    if token:
-        return token, "personal"
-    if user_id == OWNER_ID or user_id in DRAGONS or user_id in DEV_USERS:
-        if DEFAULT_GITHUB_TOKEN:
-            return DEFAULT_GITHUB_TOKEN, "default"
-    return None, None
 
 
 def auth_headers(token: str | None = None) -> dict:
@@ -210,11 +198,11 @@ async def set_git_token(_, message: Message):
 
 @bot.on_message(filters.command(["mygitoken", "gitstatus"]))
 async def my_git_token(_, message: Message):
-    token, token_type = get_effective_token(message.from_user.id)
+    token = get_user_token(message.from_user.id)
     if not token:
         return await message.reply(
             "❌ **No GitHub Token configured.**\n"
-            "Use `/setgitoken <token>` in PM to configure your personal token."
+            "Use `/setgitoken <token>` in Private Chat (PM) to configure your personal token."
         )
 
     try:
@@ -231,7 +219,6 @@ async def my_git_token(_, message: Message):
                     return await message.reply(
                         f"🔑 **GitHub Token Status**\n\n"
                         f"👤 **Logged in as:** `@{login}`\n"
-                        f"🏷️ **Token Type:** `{token_type.capitalize()}`\n"
                         f"🔒 **Token Key:** `{hidden_token}`",
                         reply_markup=InlineKeyboardMarkup(
                             [[InlineKeyboardButton("🗑️ Clear My Token", callback_data="clear_gitoken")]]
@@ -280,14 +267,14 @@ async def gitpush_start(_, message: Message):
     if doc.file_size > 50 * 1024 * 1024:
         return await message.reply("❌ File is too large. Maximum supported zip archive size is 50MB.")
 
-    token, token_type = get_effective_token(message.from_user.id)
+    token = get_user_token(message.from_user.id)
     if not token:
         return await message.reply(
             "❌ **GitHub Token Required!**\n\n"
-            "GitHub par push karne ke liye Personal Access Token (PAT) hona zaroori hai.\n\n"
-            "👉 **Set kaise karein:**\n"
-            "1. [GitHub Settings > Tokens](https://github.com/settings/tokens/new) par jaakar token banayein (`repo` scope).\n"
-            "2. Mujhe **Private Chat (PM)** me command bhejein:\n"
+            "A personal GitHub Access Token (PAT) is required to push code to GitHub.\n\n"
+            "👉 **How to configure:**\n"
+            "1. Generate a token on [GitHub Settings > Tokens](https://github.com/settings/tokens/new) with **`repo`** scope enabled.\n"
+            "2. Send me this command in **Private Chat (PM)**:\n"
             "`/setgitoken <your_token>`"
         )
 
@@ -335,7 +322,7 @@ async def gitpush_start(_, message: Message):
         "waiting_custom": None,
     }
 
-    # Step 1: Ask Visibility (Private ya Public)
+    # Step 1: Ask Visibility (Private or Public)
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔒 Private", callback_data=f"gpush_vis_private_{user_id}"),
@@ -1336,7 +1323,7 @@ Complete GitHub toolkit to inspect profiles, explore repositories, download file
 *Interactive Push Flow:*
 Reply to any `.zip` file with `/gitpush <reponame>`.
 Bot will interactively ask:
- 1. 🔒 Private ya 🌍 Public
+ 1. 🔒 Private or 🌍 Public
  2. 🌿 Branch name (`main`, `master` or custom)
  3. 💬 Commit name (default or custom)
 Then automatically push to your GitHub!
