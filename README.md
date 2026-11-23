@@ -341,10 +341,6 @@ MeowRobot ships with **over 60 modular extensions**. Below is the complete categ
 | `/git <username>` | Everyone | ғɪηᴅ ɢɪᴛʜᴜʙ ᴀᴄᴄᴏᴜɴᴛ (bio, repos, stats, avatar) |
 | `/allrepo <username>` | Everyone | ᴧʟʟ ʀєᴘᴏ ʙʏ ɢɪᴛ ᴜsєʀηᴧϻє (list public repos) |
 | `/dlrepo <repo_url>` | Everyone | ᴅσᴡηʟσᴧᴅ ᴢɪᴘ ʙʏ ʀєᴘᴏ ᴜʀʟ or `owner/repo` |
-| `/gitpush <reponame>` | Everyone | ᴘᴜsʜ ᴢɪᴘ ᴛσ ɢɪᴛʜᴜʙ (interactive private/public, branch & commit) |
-| `/setgitoken <token>` | Everyone | sєᴛ ʏσᴜʀ ᴘєʀsσηᴧʟ ɢɪᴛʜᴜʙ ᴛσᴋєη (PM only) |
-| `/mygitoken` | Everyone | ᴄʜєᴄᴋ ʏσᴜʀ ᴄᴜʀʀєηᴛ ɢɪᴛʜᴜʙ ᴛσᴋєη sᴛᴧᴛᴜs |
-| `/cleargitoken` | Everyone | ᴅєʟєᴛє ʏσᴜʀ sᴧᴠєᴅ ɢɪᴛʜᴜʙ ᴛσᴋєη |
 | `/repo <owner/repo>` | Everyone | ʀєᴘσ ᴅєᴛᴧɪʟs & sᴛᴧᴛs (stars, forks, open issues) |
 | `/searchrepo <query>` | Everyone | sєᴧʀᴄʜ ɢɪᴛʜᴜʙ ʀєᴘσsɪᴛσʀɪєs |
 | `/gitfile <repo> <path>`| Everyone | ᴠɪєᴡ/ᴅσᴡηʟσᴧᴅ sɪηɢʟє ғɪʟє from repository |
