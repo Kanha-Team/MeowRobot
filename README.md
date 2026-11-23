@@ -8,9 +8,6 @@
 # All rights reserved.
 -->
 
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,19,26&height=220&section=header&text=MeowRobot&fontSize=65&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Next-Generation%20Telegram%20Group%20Management%20%26%20AI%20Bot&descAlignY=62&descAlign=50" width="100%" alt="MeowRobot"/>
-</p>
 
 <p align="center">
   <img src="https://files.catbox.moe/4ntzos.jpg" width="280px" alt="MeowRobot Mascot" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
